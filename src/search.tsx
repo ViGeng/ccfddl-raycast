@@ -1,5 +1,8 @@
 import { Action, ActionPanel, Icon, List } from "@raycast/api";
-import { useState } from "react";
+import * as fs from "fs";
+import * as yaml from "js-yaml";
+import * as path from "path";
+import { useEffect, useState } from "react";
 
 interface Timeline {
   abstract_deadline: string;
@@ -30,42 +33,52 @@ interface Item {
 }
 
 export default function Command() {
-  // Sample data - replace with your actual data
-  const sampleItems = [
-    {
-      title: "AAAI",
-      description: "AAAI Conference on Artificial Intelligence",
-      sub: "AI",
-      rank: {
-        ccf: "A",
-        core: "A*",
-        thcpl: "A",
-      },
-      dblp: "aaai",
-      confs: [
-        {
-          year: 2025,
-          id: "aaai25",
-          link: "https://aaai.org/conference/aaai/aaai-25/",
-          timeline: [
-            {
-              abstract_deadline: "2024-08-07 23:59:59",
-              deadline: "2024-08-15 23:59:59",
-            },
-          ],
-          timezone: "UTC-12",
-          date: "February 25 - March 4, 2025",
-          place: "PHILADELPHIA, PENNSYLVANIA, USA",
-        },
-      ],
-    },
-  ];
-
+  const [items, setItems] = useState<Item[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
   const [isShowingDetail, setIsShowingDetail] = useState(true);
 
+  useEffect(() => {
+    async function loadConferenceData() {
+      try {
+        // Adjust the path to where your YAML files are stored
+        const conferenceDir = "/Users/wei/source/raycast/extensions/extensions/ccfddl/example/conference";
+        console.log("Loading conference data from", conferenceDir);
+
+        const categories = await fs.promises.readdir(conferenceDir);
+        const allItems: Item[] = [];
+
+        for (const category of categories) {
+          const categoryPath = path.join(conferenceDir, category);
+          const isDirectory = (await fs.promises.stat(categoryPath)).isDirectory();
+
+          if (isDirectory) {
+            const files = await fs.promises.readdir(categoryPath);
+
+            for (const file of files) {
+              if (file.endsWith(".yml")) {
+                const filePath = path.join(categoryPath, file);
+                const fileContent = await fs.promises.readFile(filePath, "utf8");
+                const yamlContent = yaml.load(fileContent) as Item[];
+                allItems.push(...yamlContent);
+              }
+            }
+          }
+        }
+
+        setItems(allItems);
+        setLoading(false);
+      } catch (error) {
+        console.error("Failed to load conference data:", error);
+        setLoading(false);
+      }
+    }
+
+    loadConferenceData();
+  }, []);
+
   return (
-    <List isShowingDetail={isShowingDetail} searchBarPlaceholder="Search conferences...">
-      {sampleItems.map((item) => renderListItem(item, isShowingDetail, setIsShowingDetail))}
+    <List isLoading={loading} isShowingDetail={isShowingDetail} searchBarPlaceholder="Search conferences...">
+      {items.map((item) => renderListItem(item, isShowingDetail, setIsShowingDetail))}
     </List>
   );
 }
