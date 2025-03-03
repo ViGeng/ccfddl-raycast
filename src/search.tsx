@@ -1,7 +1,6 @@
 import { Action, ActionPanel, Icon, List } from "@raycast/api";
-import * as fs from "fs";
 import * as yaml from "js-yaml";
-import * as path from "path";
+import fetch from "node-fetch";
 import { useEffect, useState } from "react";
 
 interface Timeline {
@@ -32,68 +31,122 @@ interface Item {
   confs: Conference[];
 }
 
+interface GitHubContent {
+  name: string;
+  path: string;
+  type: string;
+  url: string;
+  download_url: string | null;
+}
+
 export default function Command() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isShowingDetail, setIsShowingDetail] = useState(true);
 
   useEffect(() => {
-    async function loadConferenceData() {
+    async function fetchFromGitHub() {
       try {
-        // Adjust the path to where your YAML files are stored
-        const conferenceDir = "/Users/wei/source/raycast/extensions/extensions/ccfddl/example/conference";
-        console.log("Loading conference data from", conferenceDir);
+        // GitHub repo API endpoint for the conference directory
+        const repoOwner = "ccfddl";
+        const repoName = "ccf-deadlines";
+        const conferenceDirPath = "conference";
+        const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${conferenceDirPath}`;
 
-        const categories = await fs.promises.readdir(conferenceDir);
+        console.log("Fetching categories from GitHub:", apiUrl);
+
+        const categoriesResponse = await fetch(apiUrl);
+        if (!categoriesResponse.ok) {
+          throw new Error(`GitHub API error: ${categoriesResponse.statusText}`);
+        }
+
+        const categories = (await categoriesResponse.json()) as GitHubContent[];
         const allItems: Item[] = [];
 
+        // Process each category directory
         for (const category of categories) {
-          const categoryPath = path.join(conferenceDir, category);
-          const isDirectory = (await fs.promises.stat(categoryPath)).isDirectory();
+          if (category.type === "dir") {
+            const categoryUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${category.path}`;
+            console.log(`Fetching files from category: ${category.name}`);
 
-          if (isDirectory) {
-            const files = await fs.promises.readdir(categoryPath);
+            const filesResponse = await fetch(categoryUrl);
+            if (!filesResponse.ok) {
+              console.error(`Failed to fetch files for ${category.name}: ${filesResponse.statusText}`);
+              continue;
+            }
 
+            const files = (await filesResponse.json()) as GitHubContent[];
+
+            // Process each YAML file in the category
             for (const file of files) {
-              if (file.endsWith(".yml")) {
-                const filePath = path.join(categoryPath, file);
-                const fileContent = await fs.promises.readFile(filePath, "utf8");
-                const yamlContent = yaml.load(fileContent) as Item[];
-                allItems.push(...yamlContent);
+              if (file.name.endsWith(".yml") && file.download_url) {
+                console.log(`Fetching YAML from: ${file.name}`);
+
+                const yamlResponse = await fetch(file.download_url);
+                if (!yamlResponse.ok) {
+                  console.error(`Failed to fetch YAML for ${file.name}: ${yamlResponse.statusText}`);
+                  continue;
+                }
+
+                const yamlText = await yamlResponse.text();
+                try {
+                  const yamlContent = yaml.load(yamlText) as Item[];
+                  if (Array.isArray(yamlContent)) {
+                    allItems.push(...yamlContent);
+                  }
+                } catch (yamlError) {
+                  console.error(`Failed to parse YAML for ${file.name}:`, yamlError);
+                }
               }
             }
           }
         }
 
+        // Sort conferences within each item by year (descending)
+        allItems.forEach((item) => {
+          if (item.confs && Array.isArray(item.confs)) {
+            item.confs.sort((a, b) => b.year - a.year);
+          }
+        });
+
         setItems(allItems);
         setLoading(false);
+        console.log(`Loaded ${allItems.length} conferences from GitHub`);
       } catch (error) {
-        console.error("Failed to load conference data:", error);
+        console.error("Failed to load conference data from GitHub:", error);
         setLoading(false);
       }
     }
 
-    loadConferenceData();
+    fetchFromGitHub();
   }, []);
 
   return (
-    <List isLoading={loading} isShowingDetail={isShowingDetail} searchBarPlaceholder="Search conferences...">
+    <List
+      isLoading={loading}
+      isShowingDetail={isShowingDetail}
+      searchBarPlaceholder="Search conferences..."
+      throttle={true}
+    >
       {items.map((item) => renderListItem(item, isShowingDetail, setIsShowingDetail))}
     </List>
   );
 }
 
 function renderListItem(item: Item, isShowingDetail: boolean, setIsShowingDetail: (showing: boolean) => void) {
+  // Get the most recent conference
+  const latestConf = item.confs?.[0];
+
   return (
     <List.Item
       key={item.title}
       icon={Icon.Calendar}
       title={item.title}
       subtitle={item.sub}
-      accessories={[{ text: `Rank: ${item.rank.ccf}` }, { text: item.confs[0]?.place }]}
+      accessories={[{ text: `CCF: ${item.rank.ccf}` }, { text: latestConf?.place || "Location unknown" }]}
       actions={
         <ActionPanel>
-          <Action.OpenInBrowser title="Open Conference Website" url={item.confs[0]?.link} />
+          {latestConf?.link && <Action.OpenInBrowser title="Open Conference Website" url={latestConf.link} />}
           <Action
             title="Toggle Detail View"
             icon={Icon.Eye}
@@ -109,19 +162,27 @@ function renderListItem(item: Item, isShowingDetail: boolean, setIsShowingDetail
       }
       detail={
         <List.Item.Detail
-          markdown={`# ${item.title}\n\n${item.description}\n\n## Next Conference\n* **Date:** ${item.confs[0]?.date}\n* **Location:** ${item.confs[0]?.place}\n* **Deadline:** ${item.confs[0]?.timeline[0].deadline}\n* **Website:** [${item.confs[0]?.link}](${item.confs[0]?.link})`}
+          markdown={`# ${item.title}\n\n${item.description}\n\n## Next Conference\n* **Date:** ${latestConf?.date || "Not announced"}\n* **Location:** ${latestConf?.place || "Not announced"}\n* **Deadline:** ${latestConf?.timeline?.[0]?.deadline || "Not announced"}\n* **Website:** ${latestConf?.link ? `[${latestConf.link}](${latestConf.link})` : "Not announced"}`}
           metadata={
             <List.Item.Detail.Metadata>
               <List.Item.Detail.Metadata.Label title="Conference" text={item.title} />
               <List.Item.Detail.Metadata.Label title="Description" text={item.description} />
               <List.Item.Detail.Metadata.Separator />
               <List.Item.Detail.Metadata.Label title="Category" text={item.sub} />
-              <List.Item.Detail.Metadata.Label title="CCF Rank" text={item.rank.ccf} />
-              <List.Item.Detail.Metadata.Label title="CORE Rank" text={item.rank.core} />
-              <List.Item.Detail.Metadata.Label title="THCPL Rank" text={item.rank.thcpl} />
-              <List.Item.Detail.Metadata.Separator />
-              <List.Item.Detail.Metadata.Label title="Next Deadline" text={item.confs[0]?.timeline[0].deadline} />
-              <List.Item.Detail.Metadata.Label title="Timezone" text={item.confs[0]?.timezone} />
+              <List.Item.Detail.Metadata.Label title="CCF Rank" text={item.rank.ccf || "N/A"} />
+              <List.Item.Detail.Metadata.Label title="CORE Rank" text={item.rank.core || "N/A"} />
+              <List.Item.Detail.Metadata.Label title="THCPL Rank" text={item.rank.thcpl || "N/A"} />
+              {latestConf && (
+                <>
+                  <List.Item.Detail.Metadata.Separator />
+                  <List.Item.Detail.Metadata.Label title="Next Conference" text={`${latestConf.year}`} />
+                  <List.Item.Detail.Metadata.Label
+                    title="Next Deadline"
+                    text={latestConf.timeline?.[0]?.deadline || "N/A"}
+                  />
+                  <List.Item.Detail.Metadata.Label title="Timezone" text={latestConf.timezone || "N/A"} />
+                </>
+              )}
             </List.Item.Detail.Metadata>
           }
         />
