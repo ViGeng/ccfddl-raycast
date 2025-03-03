@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Icon, List } from "@raycast/api";
+import { Action, ActionPanel, Cache, Icon, List } from "@raycast/api";
 import * as yaml from "js-yaml";
 import fetch from "node-fetch";
 import { useEffect, useState } from "react";
@@ -39,12 +39,36 @@ interface GitHubContent {
   download_url: string | null;
 }
 
+// Constants
+const CACHE_KEY = "ccfddl-conference-data";
+const CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
+const cache = new Cache();
+
 export default function Command() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isShowingDetail, setIsShowingDetail] = useState(true);
 
   useEffect(() => {
+    async function fetchData() {
+      try {
+        // Check cache first
+        const cachedData = cache.get(CACHE_KEY);
+        if (cachedData) {
+          console.log("Using cached conference data");
+          setItems(JSON.parse(cachedData));
+          setLoading(false);
+          return;
+        }
+
+        // Fetch from GitHub if no cache
+        await fetchFromGitHub();
+      } catch (error) {
+        console.error("Failed to load conference data:", error);
+        setLoading(false);
+      }
+    }
+
     async function fetchFromGitHub() {
       try {
         // GitHub repo API endpoint for the conference directory
@@ -109,16 +133,19 @@ export default function Command() {
           }
         });
 
+        // Store in cache
+        cache.set(CACHE_KEY, JSON.stringify(allItems));
+
         setItems(allItems);
         setLoading(false);
-        console.log(`Loaded ${allItems.length} conferences from GitHub`);
+        console.log(`Loaded ${allItems.length} conferences from GitHub and cached`);
       } catch (error) {
         console.error("Failed to load conference data from GitHub:", error);
         setLoading(false);
       }
     }
 
-    fetchFromGitHub();
+    fetchData();
   }, []);
 
   return (
