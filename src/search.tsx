@@ -1,45 +1,15 @@
-import { Action, ActionPanel, Cache, Icon, List } from "@raycast/api";
+import { Cache, List } from "@raycast/api";
 import * as yaml from "js-yaml";
 import fetch from "node-fetch";
 import { useEffect, useState } from "react";
-
-interface Timeline {
-  abstract_deadline: string;
-  deadline: string;
-}
-
-interface Conference {
-  year: number;
-  id: string;
-  link: string;
-  timeline: Timeline[];
-  timezone: string;
-  date: string;
-  place: string;
-}
-
-interface Item {
-  title: string;
-  description: string;
-  sub: string;
-  rank: {
-    ccf: string;
-    core: string;
-    thcpl: string;
-  };
-  dblp: string;
-  confs: Conference[];
-}
-
-interface GitHubContent {
-  name: string;
-  path: string;
-  type: string;
-  url: string;
-  download_url: string | null;
-}
+import { renderListItem } from "./list";
+import { GitHubContent, Item } from "./types";
 
 // Constants
+// TODO: add cache expiration logic
+// TODO: add config options for users
+// TODO: add manual refresh option
+// TODO: add CDN support for better performance
 const CACHE_KEY = "ccfddl-conference-data";
 const CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
 const cache = new Cache();
@@ -157,63 +127,5 @@ export default function Command() {
     >
       {items.map((item) => renderListItem(item, isShowingDetail, setIsShowingDetail))}
     </List>
-  );
-}
-
-function renderListItem(item: Item, isShowingDetail: boolean, setIsShowingDetail: (showing: boolean) => void) {
-  // Get the most recent conference
-  const latestConf = item.confs?.[0];
-
-  return (
-    <List.Item
-      key={item.title}
-      icon={Icon.Calendar}
-      title={item.title}
-      subtitle={item.sub}
-      accessories={[{ text: `CCF: ${item.rank.ccf}` }, { text: latestConf?.place || "Location unknown" }]}
-      actions={
-        <ActionPanel>
-          {latestConf?.link && <Action.OpenInBrowser title="Open Conference Website" url={latestConf.link} />}
-          <Action
-            title="Toggle Detail View"
-            icon={Icon.Eye}
-            shortcut={{ modifiers: ["cmd"], key: "d" }}
-            onAction={() => setIsShowingDetail(!isShowingDetail)}
-          />
-          <Action.CopyToClipboard
-            title="Copy Conference Info"
-            content={`${item.title}: ${item.description}`}
-            shortcut={{ modifiers: ["cmd"], key: "c" }}
-          />
-        </ActionPanel>
-      }
-      detail={
-        <List.Item.Detail
-          markdown={`# ${item.title}\n\n${item.description}\n\n## Next Conference\n* **Date:** ${latestConf?.date || "Not announced"}\n* **Location:** ${latestConf?.place || "Not announced"}\n* **Deadline:** ${latestConf?.timeline?.[0]?.deadline || "Not announced"}\n* **Website:** ${latestConf?.link ? `[${latestConf.link}](${latestConf.link})` : "Not announced"}`}
-          metadata={
-            <List.Item.Detail.Metadata>
-              <List.Item.Detail.Metadata.Label title="Conference" text={item.title} />
-              <List.Item.Detail.Metadata.Label title="Description" text={item.description} />
-              <List.Item.Detail.Metadata.Separator />
-              <List.Item.Detail.Metadata.Label title="Category" text={item.sub} />
-              <List.Item.Detail.Metadata.Label title="CCF Rank" text={item.rank.ccf || "N/A"} />
-              <List.Item.Detail.Metadata.Label title="CORE Rank" text={item.rank.core || "N/A"} />
-              <List.Item.Detail.Metadata.Label title="THCPL Rank" text={item.rank.thcpl || "N/A"} />
-              {latestConf && (
-                <>
-                  <List.Item.Detail.Metadata.Separator />
-                  <List.Item.Detail.Metadata.Label title="Next Conference" text={`${latestConf.year}`} />
-                  <List.Item.Detail.Metadata.Label
-                    title="Next Deadline"
-                    text={latestConf.timeline?.[0]?.deadline || "N/A"}
-                  />
-                  <List.Item.Detail.Metadata.Label title="Timezone" text={latestConf.timezone || "N/A"} />
-                </>
-              )}
-            </List.Item.Detail.Metadata>
-          }
-        />
-      }
-    />
   );
 }
